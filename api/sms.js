@@ -1,19 +1,14 @@
 const axios = require('axios');
 
 export default async function handler(req, res) {
-  // Cache disable
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Token ko URL ke path se nikalna (e.g., /api/sms/194d615f...)
-  const pathParts = req.url.split('/');
-  const token = pathParts[pathParts.length - 1];
+  // Query parameter se token uthayein
+  const { token } = req.query;
 
-  if (!token || token === 'sms') {
-    return res.status(400).json({ 
-      site: "Moon US Nums", 
-      error: "Missing token in URL path" 
-    });
+  if (!token) {
+    return res.status(400).json({ site: "Moon US Nums", error: "Missing token" });
   }
 
   const target = `https://api5-sms.top/inbox/${token}`;
@@ -34,11 +29,9 @@ export default async function handler(req, res) {
     let raw = response.data;
     if (typeof raw !== 'string') raw = JSON.stringify(raw);
 
-    // Agar response JSON hai to parse karo, warna plain text hi bhej do
     let data = null;
     try { data = JSON.parse(raw); } catch (e) {}
 
-    // Agar JSON mila aur usme code hai
     if (data && (data.code || data.otp_code || (data.codes && data.codes[0]))) {
       const code = data.code || data.otp_code || data.codes[0];
       return res.status(200).json({
@@ -48,7 +41,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Agar plain text hai (jaise abhi "no otp recived yet")
     return res.status(200).json({
       site: "Moon US Nums",
       status: "waiting",
