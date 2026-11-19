@@ -1,7 +1,6 @@
 const axios = require('axios');
 
 export default async function handler(req, res) {
-  // Cache disable
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
@@ -10,65 +9,67 @@ export default async function handler(req, res) {
     return res.status(400).json({ site: "Moon US Nums", error: "Missing token" });
   }
 
-  const target = `https://api5-sms.top/inbox/${token}`;
+  // Possible API endpoints (jo bhi pehle kaam kare)
+  const endpoints = [
+    `https://api5-sms.top/api/inbox/${token}`,
+    `https://api5-sms.top/api/assignment/${token}`,
+    `https://api5-sms.top/api/orders/${token}`,
+    `https://api5-sms.top/api/inbox/${token}/data`,
+  ];
 
-  try {
-    const response = await axios.get(target, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://api5-sms.top/",
-      },
-      timeout: 15000,
-      transformResponse: [(data) => data], // Raw HTML string chahiye
-      validateStatus: () => true,
-    });
+  let data = null;
 
-    let rawHtml = response.data;
-
-    // HTML ke andar se <main> tag ka text nikalne ke liye regex
-    const mainMatch = rawHtml.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
-    let extractedText = "";
-
-    if (mainMatch && mainMatch[1]) {
-      // Agar text ke andar koi HTML tag hai to usay hata dein
-      extractedText = mainMatch[1].replace(/<[^>]+>/g, '').trim();
-    }
-
-    // === AGAR OTP NAHI AAYA (Waiting) ===
-    if (!extractedText || extractedText.toLowerCase().includes('no otp') || extractedText.toLowerCase().includes('waiting')) {
-      return res.status(200).json({
-        site: "Moon US Nums",
-        status: "waiting",
-        message: "⏳ Waiting for OTP..."
+  for (const url of endpoints) {
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*",
+          "Referer": `https://api5-sms.top/inbox/${token}`,
+        },
+        timeout: 10000,
+        validateStatus: () => true,
       });
-    }
 
-    // === AGAR OTP AA GAYA (Digits extract karein) ===
-    const codeMatch = extractedText.match(/\d{4,8}/);
-    if (codeMatch) {
-      return res.status(200).json({
-        site: "Moon US Nums",
-        status: "success",
-        code: codeMatch[0]
-      });
+      // Check if response is JSON and has otp_code
+      if (response.data && typeof response.data === 'object') {
+        if (response.data.order && response.data.order.otp_records) {
+          data = response.data;
+          break;
+        }
+      }
+    } catch (e) {
+      // Ignore and try next
     }
+  }
 
-    // Fallback: Agar kuch aur text hai
+  // Agar koi endpoint kaam na kare to waiting
+  if (!data) {
     return res.status(200).json({
       site: "Moon US Nums",
-      status: "success",
-      code: extractedText
-    });
-
-  } catch (error) {
-    const errorMsg = error.response
-      ? `Upstream Error: ${error.response.status}`
-      : `Fetch Error: ${error.message}`;
-    return res.status(500).json({
-      site: "Moon US Nums",
-      error: errorMsg,
+      status: "waiting",
+      message: "⏳ Waiting for OTP... (API endpoint not found)"
     });
   }
+
+  // OTP extract karo
+  const otpRecords = data.order?.otp_records || [];
+  const hasOtp = data.order?.has_received_sms === true && otpRecords.length > 0;
+
+  if (!hasOtp) {
+    return res.status(200).json({
+      site: "Moon US Nums",
+      status: "waiting",
+      message: "⏳ Waiting for OTP..."
+    });
+  }
+
+  const latestOtp = otpRecords[otpRecords.length - 1];
+  const code = latestOtp.otp_code;
+
+  return res.status(200).json({
+    site: "Moon US Nums",
+    status: "success",
+    code: code
+  });
 }
